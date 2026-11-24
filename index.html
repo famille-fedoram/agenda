@@ -452,7 +452,15 @@ const allowed=()=>PERMS[S.me]||[];
 const canEdit=ev=>!!S.me&&(ev.createdBy===S.me||(ev.owners||[]).every(k=>allowed().includes(k)));
 
 /* ---------- recurrence ---------- */
+function recFix(ev){
+ const r=ev.rec;if(!r||!r.f||r.f==='none')return ev;
+ const s0=parse(ev.start),e0=parse(ev.end);if(e0-s0<DAY&&!(ev.allDay&&dkey(e0)!==dkey(s0)))return ev;
+ const until=r.until||dkey(e0);
+ let e=ev.allDay?parse(dkey(s0)+'T23:59'):parse(dkey(s0)+'T'+tkey(e0));if(!ev.allDay&&e<=s0)e=addDays(e,1);
+ return{...ev,end:dkey(e)+'T'+tkey(e),rec:{...r,until}};
+}
 function occ(ev,from,to){
+ ev=recFix(ev);
  const s0=parse(ev.start),e0=parse(ev.end),dur=Math.max(0,e0-s0),r=ev.rec||{f:'none'},out=[];
  const until=r.until?addDays(parse(r.until),1):null;
  const ex=new Set(ev.ex||[]);
@@ -957,7 +965,7 @@ function openForm(ev,opt={}){
  if(!S.me){showLogin();return}
  const al=allowed();
  if(ev){
-  D=JSON.parse(JSON.stringify(ev));D.rec=D.rec||{f:'none'};D.rec.days=D.rec.days||[];D.shared=D.shared||[];D.ex=D.ex||[];
+  D=JSON.parse(JSON.stringify(recFix(ev)));D.rec=D.rec||{f:'none'};D.rec.days=D.rec.days||[];D.shared=D.shared||[];D.ex=D.ex||[];
   D._occ=opt.occ&&D.rec.f!=='none'?opt.occ:null;D._scope='all';
   if(D._occ){const o=occ(ev,parse(D._occ),addDays(parse(D._occ),2))[0];if(o){D._os=o.s;D._oe=o.e}}
  }else{
@@ -993,12 +1001,12 @@ function drawForm(){
   <div class="row">
    <div class="fld"><label class="lab" for="f-sd">Début</label><input class="inp" type="date" id="f-sd" value="${dkey(s)}"></div>
    <div class="fld ${D.allDay?'hide':''}"><label class="lab" for="f-st">Heure</label><input class="inp" type="time" id="f-st" value="${tkey(s)}" step="300"></div>
-   <div class="fld"><label class="lab" for="f-ed">Fin</label><input class="inp" type="date" id="f-ed" value="${dkey(e)}"></div>
-   <div class="fld ${D.allDay?'hide':''}"><label class="lab" for="f-et">Heure</label><input class="inp" type="time" id="f-et" value="${tkey(e)}" step="300"></div>
+   <div class="fld ${D.rec.f!=='none'&&D._scope!=='only'?'hide':''}" id="f-edw"><label class="lab" for="f-ed">Fin</label><input class="inp" type="date" id="f-ed" value="${dkey(e)}"></div>
+   <div class="fld ${D.allDay?'hide':''}"><label class="lab" for="f-et">${D.rec.f!=='none'&&D._scope!=='only'?'Heure de fin':'Heure'}</label><input class="inp" type="time" id="f-et" value="${tkey(e)}" step="300"></div>
   </div>
   <div class="fld ${D._scope==='only'?'hide':''}"><label class="lab" for="f-rec">Répétition</label><select class="inp" id="f-rec">${REC.map(r=>`<option value="${r[0]}" ${D.rec.f===r[0]?'selected':''}>${r[1]}</option>`).join('')}</select></div>
   <div class="fld ${(D.rec.f==='weekly'||D.rec.f==='biweekly')&&D._scope!=='only'?'':'hide'}" id="f-wdw"><span class="lab">Les jours</span><div class="wd" id="f-wd">${wdBtns()}</div></div>
-  <div class="fld ${D.rec.f!=='none'&&D._scope!=='only'?'':'hide'}" id="f-uw"><label class="lab" for="f-until">Jusqu'au (vide = sans fin)</label><input class="inp" type="date" id="f-until" value="${esc(D.rec.until||'')}"></div>
+  <div class="fld ${D.rec.f!=='none'&&D._scope!=='only'?'':'hide'}" id="f-uw"><label class="lab" for="f-until">Se répète jusqu'au (vide = sans fin)</label><input class="inp" type="date" id="f-until" value="${esc(D.rec.until||'')}"></div>
   <div class="fld"><span class="lab">${isB?'Véhicule':'Véhicule (facultatif)'}</span><div class="vg" id="f-veh">${vehBtns()}</div><input class="inp ${D.vehicle==='autre'?'':'hide'}" id="f-vo" placeholder="Lequel ? (ex. voiture de Mamie)" value="${esc(D.vehicleOther)}"></div>
   <div id="f-msg" aria-live="polite"></div>
   ${isB?'':`<div class="fld ${kids?'':'hide'}" id="f-cw"><label class="lab" for="f-carer">Qui accompagne ?</label><select class="inp" id="f-carer"><option value="">Personne pour l'instant</option>${LOGIN.map(k=>`<option value="${k}" ${D.carer===k?'selected':''}>${MK[k].n}</option>`).join('')}</select></div>`}
@@ -1029,7 +1037,10 @@ function vehBtns(){const isB=D.kind==='booking';return (isB?'':`<button type="bu
 function readForm(){
  const g=id=>$('#'+id);
  D.title=g('f-title').value.trim();D.allDay=g('f-all').checked;
- const sd=g('f-sd').value,ed=g('f-ed').value||sd,st=g('f-st').value||'09:00',et=g('f-et').value||st;
+ const recur=g('f-rec').value!=='none'&&!(D._occ&&D._scope==='only');
+ const sd=g('f-sd').value,st=g('f-st').value||'09:00',et=g('f-et').value||st;
+ let ed=g('f-ed').value||sd;
+ if(recur)ed=(!D.allDay&&et<=st)?dkey(addDays(parse(sd),1)):sd;
  if(D._occ&&D._scope==='only'){D._os=parse(sd+'T'+(D.allDay?'00:00':st));D._oe=parse(ed+'T'+(D.allDay?'23:59':et))}
  else{D.start=sd+'T'+(D.allDay?'00:00':st);D.end=ed+'T'+(D.allDay?'23:59':et)}
  D.rec.f=g('f-rec').value;D.rec.until=g('f-until').value;
@@ -1077,7 +1088,10 @@ function bindForm(sc){
    if(!isNaN(ne)){$('#f-ed').value=dkey(ne);$('#f-et').value=tkey(ne)}
   }
   if(id==='f-all'){readForm();drawForm();return}
-  if(id==='f-rec'){readForm();$('#f-wdw').classList.toggle('hide',!(D.rec.f==='weekly'||D.rec.f==='biweekly'));$('#f-uw').classList.toggle('hide',D.rec.f==='none')}
+  if(id==='f-rec'){
+   const rv=$('#f-rec').value,sdv=$('#f-sd').value,edv=$('#f-ed').value;
+   if(rv!=='none'&&edv>sdv&&!$('#f-until').value)$('#f-until').value=edv;
+   readForm();drawForm();return;$('#f-wdw').classList.toggle('hide',!(D.rec.f==='weekly'||D.rec.f==='biweekly'));$('#f-uw').classList.toggle('hide',D.rec.f==='none')}
   checks();
  });
  f.addEventListener('click',e=>{
