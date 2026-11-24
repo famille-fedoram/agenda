@@ -155,7 +155,7 @@ main{overflow:auto;position:relative;overscroll-behavior:contain;padding-bottom:
 .pill svg.i{width:13px;height:13px}
 /* month */
 .month{display:grid;grid-template-rows:auto 1fr;min-height:100%}
-.mgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:minmax(92px,1fr)}
+.mgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:auto;grid-auto-rows:minmax(92px,1fr)}
 .mh{font-size:12px;font-weight:700;color:var(--mute);padding:8px 8px 6px;text-transform:capitalize;border-bottom:1px solid var(--line)}
 .mc{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px;display:flex;flex-direction:column;gap:3px;text-align:left;align-items:stretch;overflow:hidden}
 .mc:nth-child(7n){border-right:0}
@@ -440,6 +440,8 @@ const hash=s=>{let a=0x811c9dc5,b=0x9e3779b1;for(let r=0;r<400;r++)for(let i=0;i
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
 const av=(k,sz)=>{const m=MK[k];return m?`<span class="av" style="--m:${m.c}${sz?`;width:${sz}px;height:${sz}px;font-size:${Math.round(sz*.44)}px`:''}" aria-hidden="true">${m.n[0]}</span>`:''};
 const ic=(id,cls='i')=>`<svg class="${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
+const SHARED='#f2c014';
+const colOf=(ev,k)=>inv(ev).length>1?SHARED:(MK[k]?.c||'#888');
 const inv=ev=>[...new Set([...(ev.owners||[]),...(ev.shared||[])])].filter(k=>MK[k]);
 const vehName=ev=>ev.vehicle==='autre'?(ev.vehicleOther||'Autre véhicule'):(VK[ev.vehicle]?.n||'');
 const vehIc=ev=>VK[ev.vehicle]?.ic||'i-key';
@@ -715,17 +717,17 @@ function layout(items){
 }
 function evBlock(o,ds,de,l,n,colMember){
  const ev=o.ev,H=52,top=ds/60*H,h=Math.max(22,(de-ds)/60*H-2);
- const people=inv(ev).filter(k=>S.sel.has(k));
+ const people=inv(ev);
  const mc=colMember||(ev.owners||[]).find(k=>S.sel.has(k))||people[0]||ev.owners?.[0];
  const shared=colMember&&!(ev.owners||[]).includes(colMember);
  const v=ev.vehicle?ic(vehIc(ev)):'';
  const r=ev.rec&&ev.rec.f&&ev.rec.f!=='none'?ic('i-rep'):'';
  const dots=!colMember&&people.length>1?`<span class="dots">${people.map(k=>`<i style="--m:${MK[k].c}"></i>`).join('')}</span>`:'';
- return `<button class="ev${shared?' sh':''}${ev.kind==='booking'?' bk':''}" style="--m:${MK[mc]?.c||'#888'};top:${top}px;height:${h}px;left:calc(${l/n*100}% + 2px);width:calc(${100/n}% - 4px)" data-id="${esc(ev.id)}" data-k="${o.k}"><b>${catIc(ev)}${v}${esc(evTitle(ev))}${r}</b>${h>34?`<small>${hm(o.s)} – ${hm(o.e)}${ev.place?' · '+esc(ev.place):''}</small>`:''}${h>56?dots:''}</button>`;
+ return `<button class="ev${shared?' sh':''}${ev.kind==='booking'?' bk':''}" style="--m:${colMember?MK[colMember].c:colOf(ev,mc)};top:${top}px;height:${h}px;left:calc(${l/n*100}% + 2px);width:calc(${100/n}% - 4px)" data-id="${esc(ev.id)}" data-k="${o.k}"><b>${catIc(ev)}${v}${esc(evTitle(ev))}${r}</b>${h>34?`<small>${hm(o.s)} – ${hm(o.e)}${ev.place?' · '+esc(ev.place):''}</small>`:''}${h>44?dots:''}</button>`;
 }
 function pill(o,colMember){
  const ev=o.ev,mc=colMember||(ev.owners||[]).find(k=>S.sel.has(k))||inv(ev)[0];
- return `<button class="pill" style="--m:${MK[mc]?.c||'#888'}" data-id="${esc(ev.id)}" data-k="${o.k}">${catIc(ev)}${ev.vehicle?ic(vehIc(ev)):''}${esc(evTitle(ev))}</button>`;
+ return `<button class="pill" style="--m:${colMember?MK[colMember].c:colOf(ev,mc)}" data-id="${esc(ev.id)}" data-k="${o.k}">${catIc(ev)}${ev.vehicle?ic(vehIc(ev)):''}${esc(evTitle(ev))}</button>`;
 }
 function grid(cols,cw='0px'){
  const t=new Date(),H=52;
@@ -766,7 +768,7 @@ function item(o,d){
  if(ev.carer&&MK[ev.carer])m.push(`<span>${ic('i-hand')}${MK[ev.carer].n}</span>`);
  if(ev.place)m.push(`<span>${ic('i-pin')}${esc(ev.place)}</span>`);
  if(ev.rec&&ev.rec.f&&ev.rec.f!=='none')m.push(`<span>${ic('i-rep')}</span>`);
- return `<button class="item" data-id="${esc(ev.id)}" data-k="${o.k}"><span class="t">${t}</span><span class="b" style="--m:${MK[mc]?.c||'#888'}"><span class="ti">${catIc(ev)}${esc(evTitle(ev))}</span><span class="meta">${m.join('')}</span></span></button>`;
+ return `<button class="item" data-id="${esc(ev.id)}" data-k="${o.k}"><span class="t">${t}</span><span class="b" style="--m:${colOf(ev,mc)}"><span class="ti">${catIc(ev)}${esc(evTitle(ev))}</span><span class="meta">${m.join('')}</span></span></button>`;
 }
 function dayList(d,occs,withHead=true){
  const n=addDays(d,1),mine=occs.filter(o=>o.s<n&&o.e>d),t=today();
