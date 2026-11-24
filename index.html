@@ -743,9 +743,11 @@ function grid(cols,cw='0px'){
   layout(items);
   const now=same(d0,t)?`<div class="nowl" style="top:${(t.getHours()*60+t.getMinutes())/60*H}px"></div>`:'';
   const wk=d0.getDay()%6===0&&!c.member;
+  const dl=[];for(const u of (c.duties||[]).sort((a,b)=>a.s-b.s)){let l=dl.findIndex(e=>e<=u.s);if(l<0){l=dl.length;dl.push(0)}dl[l]=u.e;u.lane=l}
+  const rp=c.member?Math.max(12,4+dl.length*9):0;
   const dut=(c.duties||[]).map(u=>{const a=Math.max(0,(u.s-d0)/6e4),b=Math.min(1440,(u.e-d0)/6e4);if(b<=a)return'';const names=u.kids.map(k=>MK[k].n).join(' et ');
-   return `<button class="duty" style="top:${a/60*H}px;height:${Math.max(8,(b-a)/60*H)}px" data-id="${esc(u.ev.id)}" data-k="${u.k}" title="Accompagne ${esc(names)} · ${esc(evTitle(u.ev))} ${legTxt(u)}${hm(u.s)}–${hm(u.e)}" aria-label="Accompagne ${esc(names)}, ${esc(evTitle(u.ev))}, ${legTxt(u)}${hm(u.s)} à ${hm(u.e)}">${u.kids.map(k=>`<i style="--m:${MK[k].c}"></i>`).join('')}</button>`}).join('');
-  h+=`<div class="col${wk?' wk':''}" style="height:${24*H}px${c.member?';--rp:12px':''}" data-date="${dkey(d0)}" data-m="${c.member||''}">${now}${items.map(x=>evBlock(x.o,x.ds,x.de,x.l,x.n,c.member)).join('')}${dut}</div>`;
+   return `<button class="duty" style="right:${2+u.lane*9}px;top:${a/60*H}px;height:${Math.max(8,(b-a)/60*H)}px" data-id="${esc(u.ev.id)}" data-k="${u.k}" title="Accompagne ${esc(names)} · ${esc(evTitle(u.ev))} ${legTxt(u)}${hm(u.s)}–${hm(u.e)}" aria-label="Accompagne ${esc(names)}, ${esc(evTitle(u.ev))}, ${legTxt(u)}${hm(u.s)} à ${hm(u.e)}">${u.kids.map(k=>`<i style="--m:${MK[k].c}"></i>`).join('')}</button>`}).join('');
+  h+=`<div class="col${wk?' wk':''}" style="height:${24*H}px${c.member?';--rp:'+rp+'px':''}" data-date="${dkey(d0)}" data-m="${c.member||''}">${now}${items.map(x=>evBlock(x.o,x.ds,x.de,x.l,x.n,c.member)).join('')}${dut}</div>`;
  }
  return h+'</div>';
 }
