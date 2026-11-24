@@ -398,6 +398,8 @@ const MK=Object.fromEntries(MEMBERS.map(m=>[m.k,m]));
 const ALL=MEMBERS.map(m=>m.k);
 const PERMS={delphine:ALL.filter(k=>k!=='robin'),robin:ALL.filter(k=>k!=='delphine'),florelle:['florelle'],ombeline:['ombeline']};
 const LOGIN=['delphine','robin','florelle','ombeline'];
+const NEEDCARE=['marin','alba','ombeline'];
+const TRIPS=[['full','Toute la durée'],['aller','Aller'],['retour','Retour'],['ar','Aller + retour']];
 const VEH=[{k:'c4',n:'C4 Picasso',ic:'v-van'},{k:'clio',n:'Clio',ic:'v-car'},{k:'captur',n:'Captur',ic:'v-suv'},{k:'velo',n:'Vélo SETRAM',ic:'v-bike'},{k:'trott',n:'Trottinette',ic:'v-scoot'},{k:'autre',n:'Autre',ic:'i-key'}];
 const VK=Object.fromEntries(VEH.map(v=>[v.k,v]));
 const CATS=[{k:'school',n:'École',ic:'c-school'},{k:'sport',n:'Sport',ic:'c-sport'},{k:'health',n:'Santé',ic:'c-health'},{k:'bday',n:'Anniversaire',ic:'c-bday'},{k:'work',n:'Travail',ic:'c-work'},{k:'fun',n:'Loisirs',ic:'c-fun'},{k:'family',n:'Famille',ic:'c-family'},{k:'rdv',n:'Rendez-vous',ic:'c-rdv'},{k:'trip',n:'Vacances',ic:'c-trip'},{k:'meal',n:'Repas',ic:'c-meal'}];
@@ -492,14 +494,47 @@ function visible(from,to,members){
 }
 const isAllDay=o=>o.ev.allDay||(o.e-o.s)>=DAY;
 const horizon=c=>{const s0=parse(c.start);const r=c.rec||{};if(!r.f||r.f==='none')return[s0,parse(c.end)];return[s0,r.until?addDays(parse(r.until),1):addDays(s0,366)]};
+const driver=ev=>ev.kind==='booking'?(ev.owners||[])[0]:(ev.carer||(ev.owners||[])[0]||'');
+const MIN=6e4,PAD=4*36e5;
+const tripOf=ev=>ev.vehicle&&!ev.allDay&&ev.kind!=='booking'&&ev.vTrip?ev.vTrip:'full';
+const VA=ev=>ev.vA||{from:-30,to:15},VR=ev=>ev.vR||{from:-15,to:30};
+function uses(ev,from,to){
+ if(!ev.vehicle)return[];
+ const t=tripOf(ev),out=[];
+ for(const o of occ(ev,new Date(from-PAD),new Date(+to+PAD))){
+  const mk=(s,e,leg)=>{if(e>s&&e>from&&s<to)out.push({ev:o.ev,s,e,k:o.k,leg})};
+  if(t==='full')mk(o.s,o.e,'');
+  if(t==='aller'||t==='ar'){const a=VA(ev);mk(new Date(+o.s+a.from*MIN),new Date(+o.s+a.to*MIN),'aller')}
+  if(t==='retour'||t==='ar'){const r=VR(ev);mk(new Date(+o.e+r.from*MIN),new Date(+o.e+r.to*MIN),'retour')}
+ }
+ return out;
+}
+const legTxt=u=>u.leg?(u.leg==='aller'?'aller ':'retour '):'';
 function conflict(c,skip){
  const k=vkey(c);if(!k)return null;
- const[from,to]=horizon(c);const mine=occ(c,from,to).slice(0,500);if(!mine.length)return null;
+ const[from,to]=horizon(c);const mine=uses(c,new Date(from-PAD),new Date(+to+PAD)).slice(0,800);if(!mine.length)return null;
+ const me=driver(c);
  for(const o of S.events.values()){
   if(o.id===c.id||vkey(o)!==k)continue;
-  for(const b of occ(o,from,to)){
+  if(me&&driver(o)===me)continue;
+  for(const b of uses(o,new Date(from-PAD),new Date(+to+PAD))){
    if(skip&&skip.id===o.id&&skip.k===b.k)continue;
    for(const a of mine)if(a.s<b.e&&b.s<a.e)return{o,b,a};
+  }
+ }
+ return null;
+}
+const dutyIv=(ev,p,from,to)=>ev.carer!==p?[]:(ev.vehicle&&tripOf(ev)!=='full'?uses(ev,from,to):occ(ev,from,to).filter(o=>!isAllDay(o)));
+const ownIv=(ev,p,from,to)=>(ev.owners||[]).includes(p)&&!ev.allDay&&ev.carer!==p?occ(ev,from,to).filter(o=>!isAllDay(o)):[];
+function dutyClash(c,skip){
+ const[f0,t0]=horizon(c),from=new Date(f0-PAD),to=new Date(+t0+PAD);
+ for(const p of new Set([c.carer,...(c.owners||[])].filter(k=>k&&MK[k]))){
+  const mD=dutyIv(c,p,from,to).slice(0,600),mO=ownIv(c,p,from,to).slice(0,600);
+  if(!mD.length&&!mO.length)continue;
+  for(const o of S.events.values()){
+   if(o.id===c.id)continue;
+   for(const[A,B,kind]of[[mD,mD.length?ownIv(o,p,from,to):[],'duty'],[mO,mO.length?dutyIv(o,p,from,to):[],'own']])
+    for(const b of B){if(skip&&skip.id===o.id&&skip.k===b.k)continue;for(const a of A)if(a.s<b.e&&b.s<a.e)return{p,o,a,b,kind}}
   }
  }
  return null;
@@ -727,7 +762,7 @@ function item(o,d){
  const t=allD?'<span>Journée</span>':cont?`<span>…</span><small>→ ${hm(o.e)}</small>`:`${hm(o.s)}<small>${hm(o.e)}</small>`;
  const ppl=`<span style="display:inline-flex;gap:3px">${people.map(k=>av(k,20)).join('')}</span>`;
  const m=[ppl];
- if(ev.vehicle)m.push(`<span>${ic(vehIc(ev))}${esc(vehName(ev))}</span>`);
+ if(ev.vehicle){const t=tripOf(ev),us=uses(ev,new Date(o.s-PAD),new Date(+o.e+PAD)).filter(u=>u.k===o.k);m.push(`<span>${ic(vehIc(ev))}${esc(vehName(ev))}${t==='full'?'':' · '+us.map(u=>legTxt(u)+hm(u.s)+'–'+hm(u.e)).join(', ')}${MK[driver(ev)]&&driver(ev)!==(ev.owners||[])[0]?' · '+MK[driver(ev)].n:''}</span>`)}
  if(ev.carer&&MK[ev.carer])m.push(`<span>${ic('i-hand')}${MK[ev.carer].n}</span>`);
  if(ev.place)m.push(`<span>${ic('i-pin')}${esc(ev.place)}</span>`);
  if(ev.rec&&ev.rec.f&&ev.rec.f!=='none')m.push(`<span>${ic('i-rep')}</span>`);
@@ -761,17 +796,17 @@ function garageView(){
  const all=[...S.events.values()].filter(e=>e.vehicle);
  let h=`<div class="garage"><p style="margin:0 0 4px;color:var(--mute)">Qui prend quoi, et quand. Une réservation bloque le véhicule pour tout le monde.</p>`;
  for(const v of VEH){
-  const occs=all.filter(e=>e.vehicle===v.k).flatMap(e=>occ(e,d,n)).sort((a,b)=>a.s-b.s);
+  const occs=all.filter(e=>e.vehicle===v.k).flatMap(e=>uses(e,d,n)).sort((a,b)=>a.s-b.s);
   let st='';
   if(isT){const cur=occs.find(o=>o.s<=now&&o.e>now);const nx=occs.find(o=>o.s>now);
-   st=cur?`<span class="st busy">Pris par ${MK[cur.ev.owners?.[0]]?.n||'?'} jusqu'à ${hm(cur.e>n?n:cur.e)}</span>`:`<span class="st free">Libre${nx?' jusqu\'à '+hm(nx.s):' toute la journée'}</span>`}
+   st=cur?`<span class="st busy">Pris par ${MK[driver(cur.ev)]?.n||'?'} jusqu'à ${hm(cur.e>n?n:cur.e)}</span>`:`<span class="st free">Libre${nx?' jusqu\'à '+hm(nx.s):' toute la journée'}</span>`}
   else st=occs.length?`<span class="st busy">${occs.length} réservation${occs.length>1?'s':''}</span>`:`<span class="st free">Libre toute la journée</span>`;
   const ticks=[8,12,16,20].map(x=>`<span class="tk" style="left:${(x-H0)/(H1-H0)*100}%">${x}h</span>`).join('');
-  const bars=occs.map(o=>{const l=pos(o.s<d?d:o.s),r=pos(o.e>n?n:o.e),w=Math.max(r-l,2.5);const who=o.ev.owners?.[0];return `<button class="bkb" style="left:${l}%;width:${w}%;--m:${MK[who]?.c||'#777'}" data-id="${esc(o.ev.id)}" data-k="${o.k}" title="${esc(evTitle(o.ev))} · ${hm(o.s)}–${hm(o.e)}">${MK[who]?.n||''} · ${esc(o.ev.vehicle==='autre'?vehName(o.ev):evTitle(o.ev))}</button>`}).join('');
+  const bars=occs.map(o=>{const l=pos(o.s<d?d:o.s),r=pos(o.e>n?n:o.e),w=Math.max(r-l,2.5);const who=driver(o.ev);return `<button class="bkb" style="left:${l}%;width:${w}%;--m:${MK[who]?.c||'#777'}" data-id="${esc(o.ev.id)}" data-k="${o.k}" title="${esc(evTitle(o.ev))} · ${hm(o.s)}–${hm(o.e)}">${MK[who]?.n||''} · ${legTxt(o)}${esc(o.ev.vehicle==='autre'?vehName(o.ev):evTitle(o.ev))}</button>`}).join('');
   const ng=isT?`<span class="nowg" style="left:${pos(now)}%"></span>`:'';
   h+=`<div class="vrow"><div class="vname"><span class="vic">${ic(v.ic)}</span><span><b>${v.n}</b>${st}</span></div><div class="track" aria-label="Réservations ${v.n}">${ticks}${bars}${ng}</div><button class="btn" data-book="${v.k}">Réserver</button></div>`;
  }
- const up=all.flatMap(e=>occ(e,now,addDays(today(),15))).sort((a,b)=>a.s-b.s).slice(0,30);
+ const seen=new Set(),up=all.flatMap(e=>uses(e,now,addDays(today(),15))).sort((a,b)=>a.s-b.s).filter(u=>{const k=u.ev.id+u.k;if(seen.has(k))return false;seen.add(k);return true}).slice(0,30).map(u=>occ(u.ev,parse(u.k),addDays(parse(u.k),2))[0]||u);
  h+=`<h2 class="h2">Prochaines réservations</h2>`;
  h+=up.length?up.map(o=>item(o,sod(o.s)).replace('<span class="t">',`<span class="t"><small>${fDs.format(o.s)}</small>`)).join(''):'<div class="empty" style="padding-left:0">Aucune réservation dans les 15 prochains jours.</div>';
  return h+'</div>';
@@ -986,7 +1021,7 @@ function drawForm(){
  const al=allowed(),isB=D.kind==='booking',editing=!!D.id;
  const{s,e}=D._occ&&D._scope==='all'?{s:parse(D.start),e:parse(D.end)}:fval();
  const head=editing?(isB?'Modifier la réservation':'Modifier l\'évènement'):(isB?'Réserver un véhicule':'Nouvel évènement');
- const kids=D.owners.some(k=>k==='marin'||k==='alba');
+ const kids=D.owners.some(k=>NEEDCARE.includes(k));
  const html=`
  <div class="sh-h"><h2>${head}</h2><button class="x" aria-label="Fermer">${ic('i-x')}</button></div>
  <form class="sh-b" id="ff" novalidate>
@@ -1008,8 +1043,12 @@ function drawForm(){
   <div class="fld ${(D.rec.f==='weekly'||D.rec.f==='biweekly')&&D._scope!=='only'?'':'hide'}" id="f-wdw"><span class="lab">Les jours</span><div class="wd" id="f-wd">${wdBtns()}</div></div>
   <div class="fld ${D.rec.f!=='none'&&D._scope!=='only'?'':'hide'}" id="f-uw"><label class="lab" for="f-until">Se répète jusqu'au (vide = sans fin)</label><input class="inp" type="date" id="f-until" value="${esc(D.rec.until||'')}"></div>
   <div class="fld"><span class="lab">${isB?'Véhicule':'Véhicule (facultatif)'}</span><div class="vg" id="f-veh">${vehBtns()}</div><input class="inp ${D.vehicle==='autre'?'':'hide'}" id="f-vo" placeholder="Lequel ? (ex. voiture de Mamie)" value="${esc(D.vehicleOther)}"></div>
+  ${isB?'':`<div class="fld ${D.vehicle&&!D.allDay?'':'hide'}" id="f-tw"><span class="lab">Le véhicule est pris pour</span><div class="seg" role="group" id="f-trip">${TRIPS.map(([k,n])=>`<button type="button" data-trip="${k}" aria-pressed="${(D.vTrip||'full')===k}">${n}</button>`).join('')}</div>
+   <div class="row ${['aller','ar'].includes(D.vTrip)?'':'hide'}" id="f-aw"><div class="fld"><label class="lab" for="f-a1">Aller : départ</label><input class="inp" type="time" id="f-a1" step="300"></div><div class="fld"><label class="lab" for="f-a2">Véhicule réservé jusqu'à</label><input class="inp" type="time" id="f-a2" step="300"></div></div>
+   <div class="row ${['retour','ar'].includes(D.vTrip)?'':'hide'}" id="f-rw"><div class="fld"><label class="lab" for="f-r1">Retour : véhicule réservé à partir de</label><input class="inp" type="time" id="f-r1" step="300"></div><div class="fld"><label class="lab" for="f-r2">Retour à la maison</label><input class="inp" type="time" id="f-r2" step="300"></div></div>
+   <span class="lab" style="font-weight:500">Entre l'aller et le retour, le véhicule redevient libre. Un même accompagnant peut enchaîner plusieurs trajets avec le même véhicule.</span></div>`}
   <div id="f-msg" aria-live="polite"></div>
-  ${isB?'':`<div class="fld ${kids?'':'hide'}" id="f-cw"><label class="lab" for="f-carer">Qui accompagne ?</label><select class="inp" id="f-carer"><option value="">Personne pour l'instant</option>${LOGIN.map(k=>`<option value="${k}" ${D.carer===k?'selected':''}>${MK[k].n}</option>`).join('')}</select></div>`}
+  ${isB?'':`<div class="fld ${kids?'':'hide'}" id="f-cw"><label class="lab" for="f-carer">Qui accompagne (et conduit) ?</label><select class="inp" id="f-carer"><option value="">Personne pour l'instant</option>${LOGIN.map(k=>`<option value="${k}" ${D.carer===k?'selected':''}>${MK[k].n}</option>`).join('')}</select></div>`}
   <div class="fld"><label class="lab" for="f-place">Lieu</label><input class="inp" id="f-place" value="${esc(D.place)}" placeholder="Ex. Gymnase, école…"></div>
   <div class="fld"><label class="lab" for="f-note">Note</label><textarea class="inp" id="f-note" placeholder="Affaires à prendre, code portail…">${esc(D.note)}</textarea></div>
   ${D.src==='ics'?`<div class="msg info">${ic('i-in')}<span>Importé depuis ${esc(D.srcName||'un calendrier')}. Un nouvel import remplacera ces informations.</span></div>`:''}
@@ -1045,6 +1084,10 @@ function readForm(){
  else{D.start=sd+'T'+(D.allDay?'00:00':st);D.end=ed+'T'+(D.allDay?'23:59':et)}
  D.rec.f=g('f-rec').value;D.rec.until=g('f-until').value;
  D.vehicleOther=g('f-vo').value.trim();
+ if(g('f-a1')){const S0=D._occ&&D._scope==='only'?D._os:parse(D.start),E0=D._occ&&D._scope==='only'?D._oe:parse(D.end);
+  const off=(v,base)=>{if(!v)return null;let t=parse(dkey(base)+'T'+v);let m=Math.round((t-base)/MIN);if(m>720)m-=1440;if(m<-720)m+=1440;return m};
+  const a1=off(g('f-a1').value,S0),a2=off(g('f-a2').value,S0),r1=off(g('f-r1').value,E0),r2=off(g('f-r2').value,E0);
+  if(a1!=null&&a2!=null)D.vA={from:a1,to:a2};if(r1!=null&&r2!=null)D.vR={from:r1,to:r2};}
  if(g('f-carer'))D.carer=g('f-carer').value;
  D.place=g('f-place').value.trim();D.note=g('f-note').value.trim();
 }
@@ -1061,21 +1104,34 @@ function checks(){
  const msgs=[];let block=false;
  const s=parse(c.start),e=parse(c.end);
  if(e<=s){msgs.push(['err','La fin doit être après le début.']);block=true}
+ if(c.vehicle&&tripOf(c)!=='full'){const a=VA(c),r=VR(c),t=tripOf(c);
+  if((t==='aller'||t==='ar')&&a.to<=a.from){msgs.push(['err','Aller : l\'heure de fin de réservation doit être après le départ.']);block=true}
+  if((t==='retour'||t==='ar')&&r.to<=r.from){msgs.push(['err','Retour : l\'heure de retour doit être après le début de réservation.']);block=true}}
  if(D.kind!=='booking'&&!D.title){block=true}
  if(D.kind==='booking'&&!D.vehicle){msgs.push(['info','Choisissez le véhicule à réserver.']);block=true}
  if(!D.owners.length){msgs.push(['err','Choisissez au moins une personne.']);block=true}
  if(D.vehicle==='autre'&&!D.vehicleOther)msgs.push(['info','Précisez le véhicule « Autre » pour pouvoir détecter les doubles réservations.']);
  if(e>s){
   const cf=conflict(c,skip);
-  if(cf){block=true;const who=MK[cf.o.owners?.[0]]?.n||'quelqu\'un';msgs.push(['err',`<b>${esc(vehName(c))} déjà réservé</b> par ${who} le ${fDs.format(cf.b.s)} de ${hm(cf.b.s)} à ${hm(cf.b.e)} (${esc(evTitle(cf.o))}). Choisissez un autre véhicule ou un autre horaire.`])}
-  const pc=peopleClash(c);if(pc)msgs.push(['warn',`${MK[pc.k].n} a déjà « ${esc(evTitle(pc.o))} » à ce moment-là.`]);
+  if(cf){block=true;const who=MK[driver(cf.o)]?.n||'quelqu\'un';msgs.push(['err',`<b>${esc(vehName(c))} déjà réservé</b> par ${who} le ${fDs.format(cf.b.s)} de ${hm(cf.b.s)} à ${hm(cf.b.e)} (${legTxt(cf.b)}${esc(evTitle(cf.o))}). Choisissez un autre véhicule, un autre horaire, un trajet aller ou retour seulement, ou indiquez le même accompagnant.`])}
+  const dc=dutyClash(c,skip);
+  if(dc){block=true;const P=MK[dc.p].n,when=fDs.format(dc.b.s);
+   msgs.push(['err',dc.kind==='duty'
+    ?`<b>${P} n'est pas disponible</b> pour accompagner le ${when} : ${P} a « ${esc(evTitle(dc.o))} » de ${hm(dc.b.s)} à ${hm(dc.b.e)}. Choisissez un autre accompagnant ou ajustez les horaires du trajet.`
+    :`<b>${P} accompagne déjà</b> « ${esc(evTitle(dc.o))} » le ${when} (${legTxt(dc.b)}${hm(dc.b.s)}–${hm(dc.b.e)}). Impossible d'avoir un rendez-vous personnel en même temps : changez l'horaire ou l'accompagnant de « ${esc(evTitle(dc.o))} ».`])}
+  const pc=dc?null:peopleClash(c);if(pc)msgs.push(['warn',`${MK[pc.k].n} a déjà « ${esc(evTitle(pc.o))} » à ce moment-là.`]);
   for(const v of VEH){const b=$('#vb-'+v.k);if(!b)continue;const busy=v.k!=='autre'&&v.k!==D.vehicle&&conflict({...c,vehicle:v.k},skip);b.classList.toggle('hide',!busy);b.parentElement.classList.toggle('busy',!!busy)}
  }
  $('#f-msg').innerHTML=msgs.map(([t,m])=>`<div class="msg ${t}">${m}</div>`).join('');
  $('#f-save').disabled=block;
  $('#f-save').title=D.kind!=='booking'&&!D.title?'Ajoutez un titre':'';
 }
+function fillTrip(){
+ if(!$('#f-a1'))return;const S0=D._occ&&D._scope==='only'?D._os:parse(D.start),E0=D._occ&&D._scope==='only'?D._oe:parse(D.end);const a=VA(D),r=VR(D);
+ $('#f-a1').value=tkey(new Date(+S0+a.from*MIN));$('#f-a2').value=tkey(new Date(+S0+a.to*MIN));$('#f-r1').value=tkey(new Date(+E0+r.from*MIN));$('#f-r2').value=tkey(new Date(+E0+r.to*MIN));
+}
 function bindForm(sc){
+ fillTrip();
  sc.querySelector('.x').onclick=closeSheet;$('#f-cancel').onclick=closeSheet;
  const f=$('#ff');f.onsubmit=e=>{e.preventDefault();save()};
  let prevS=parse(D.start);
@@ -1088,6 +1144,7 @@ function bindForm(sc){
    if(!isNaN(ne)){$('#f-ed').value=dkey(ne);$('#f-et').value=tkey(ne)}
   }
   if(id==='f-all'){readForm();drawForm();return}
+  if(['f-sd','f-st','f-ed','f-et'].includes(id)){checks();fillTrip();return}
   if(id==='f-rec'){
    const rv=$('#f-rec').value,sdv=$('#f-sd').value,edv=$('#f-ed').value;
    if(rv!=='none'&&edv>sdv&&!$('#f-until').value)$('#f-until').value=edv;
@@ -1099,15 +1156,16 @@ function bindForm(sc){
   if(b.dataset.kind){readForm();D.kind=b.dataset.kind;if(D.kind==='booking'){D.shared=[];if(!D.vehicle)D.vehicle=''}drawForm();return}
   if(b.dataset.tpl){const t=allTpl().find(x=>x.id===b.dataset.tpl);if(t)applyTpl(t);return}
   if(b.dataset.cat!==undefined){D.cat=D.cat===b.dataset.cat?'':b.dataset.cat;$('#f-cat').innerHTML=catBtns();return}
+  if(b.dataset.trip){readForm();D.vTrip=b.dataset.trip;for(const x of f.querySelectorAll('[data-trip]'))x.setAttribute('aria-pressed',x.dataset.trip===D.vTrip);$('#f-aw').classList.toggle('hide',!['aller','ar'].includes(D.vTrip));$('#f-rw').classList.toggle('hide',!['retour','ar'].includes(D.vTrip));fillTrip();checks();return}
   if(b.dataset.scope){readForm();D._scope=b.dataset.scope;drawForm();return}
   if(b.dataset.own!==undefined){const k=b.dataset.own;
    if(D.kind==='booking')D.owners=[k];else if(D.owners.includes(k)){if(D.owners.length>1)D.owners=D.owners.filter(x=>x!==k)}else{D.owners.push(k);D.shared=D.shared.filter(x=>x!==k)}
    $('#f-own').innerHTML=ownChips();if($('#f-sh'))$('#f-sh').innerHTML=shChips();
-   const cw=$('#f-cw');if(cw)cw.classList.toggle('hide',!D.owners.some(k=>k==='marin'||k==='alba'));checks();return}
+   const cw=$('#f-cw');if(cw)cw.classList.toggle('hide',!D.owners.some(k=>NEEDCARE.includes(k)));checks();return}
   if(b.dataset.shall){const rest=MEMBERS.filter(m=>!D.owners.includes(m.k)).map(m=>m.k);D.shared=rest.every(k=>D.shared.includes(k))?[]:rest;$('#f-sh').innerHTML=shChips();checks();return}
   if(b.dataset.sh){const k=b.dataset.sh;D.shared=D.shared.includes(k)?D.shared.filter(x=>x!==k):[...D.shared,k];$('#f-sh').innerHTML=shChips();checks();return}
   if(b.dataset.wd){const v=+b.dataset.wd;let days=D.rec.days.length?D.rec.days:[parse(D.start).getDay()];days=days.includes(v)?days.filter(x=>x!==v):[...days,v];if(!days.length)days=[v];D.rec.days=days;$('#f-wd').innerHTML=wdBtns();checks();return}
-  if(b.dataset.veh!==undefined){D.vehicle=b.dataset.veh;for(const x of f.querySelectorAll('[data-veh]'))x.setAttribute('aria-pressed',x.dataset.veh===D.vehicle);$('#f-vo').classList.toggle('hide',D.vehicle!=='autre');if(D.vehicle==='autre')$('#f-vo').focus();checks();return}
+  if(b.dataset.veh!==undefined){D.vehicle=b.dataset.veh;for(const x of f.querySelectorAll('[data-veh]'))x.setAttribute('aria-pressed',x.dataset.veh===D.vehicle);$('#f-vo').classList.toggle('hide',D.vehicle!=='autre');if($('#f-tw'))$('#f-tw').classList.toggle('hide',!D.vehicle||D.allDay);if(D.vehicle==='autre')$('#f-vo').focus();checks();return}
  });
  $('#f-save').onclick=save;
  $('#f-tsave')&&($('#f-tsave').onclick=async()=>{readForm();if(!D.title){toast('Ajoutez d\'abord un titre.');$('#f-title').focus();return}
@@ -1121,7 +1179,7 @@ async function save(){
  checks();if($('#f-save').disabled){if(D.kind!=='booking'&&!D.title){$('#f-title').focus();toast('Ajoutez un titre.')}return}
  const btn=$('#f-save');btn.disabled=true;btn.textContent='…';
  const now=new Date().toISOString();
- const base={kind:D.kind,cat:D.kind==='booking'?'':(D.cat||''),title:D.title,owners:D.owners,shared:D.kind==='booking'?[]:D.shared.filter(k=>!D.owners.includes(k)),allDay:D.allDay,vehicle:D.vehicle,vehicleOther:D.vehicle==='autre'?D.vehicleOther:'',carer:D.owners.some(k=>k==='marin'||k==='alba')?D.carer:'',place:D.place,note:D.note,updatedBy:S.me,updatedAt:now};
+ const base={kind:D.kind,cat:D.kind==='booking'?'':(D.cat||''),title:D.title,owners:D.owners,shared:D.kind==='booking'?[]:D.shared.filter(k=>!D.owners.includes(k)),allDay:D.allDay,vehicle:D.vehicle,vTrip:D.kind==='booking'||!D.vehicle?'full':(D.vTrip||'full'),vA:D.vA||null,vR:D.vR||null,vehicleOther:D.vehicle==='autre'?D.vehicleOther:'',carer:D.owners.some(k=>NEEDCARE.includes(k))?D.carer:'',place:D.place,note:D.note,updatedBy:S.me,updatedAt:now};
  try{
   if(D._occ&&D._scope==='only'){
    const series=S.events.get(D.id);
