@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Chaque famille vit sous familles/<code famille>. Sans le code, impossible de lister ou lire.
+    match /familles/{fam}/{col}/{id} {
+      allow read, write: if fam.size() == 19
+        && col in ['events', 'todos', 'templates', 'config'];
+    }
+  }
+}
