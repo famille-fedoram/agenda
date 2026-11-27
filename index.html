@@ -733,7 +733,7 @@ function render(){
  else m.innerHTML=garageView();
  const nv=S.view+(S.view==='day'?S.dayMode:'')+dkey(S.view==='week'?sow(S.cur):S.cur);
  if(keep!=null)m.scrollTop=keep;
- else if(m.querySelector('.grid')){m.scrollTop=7*52;m.scrollLeft=0}else m.scrollTop=0;
+ else{m.scrollTop=0;m.scrollLeft=0}
  m.dataset.v=nv;
 }
 function renderDaybar(){
@@ -796,17 +796,22 @@ function grid(cols,cw='0px',cmp=false){
  let h=`<div class="grid${cmp?' cmp':''}" style="--n:${cols.length};--cw:${cw}"><div class="gh corner"></div>`;
  h+=cols.map(c=>`<div class="gh">${c.head}</div>`).join('');
  h+=`<div class="ad corner">jour</div>`+cols.map(c=>`<div class="ad">${c.all.map(o=>pill(o,c.member,cmp)).join('')}</div>`).join('');
- h+=`<div class="hours">${Array.from({length:24},(_,i)=>`<div>${i?i+':00':''}</div>`).join('')}</div>`;
- for(const c of cols){
-  const d0=c.date,items=c.timed.map(o=>({o,ds:Math.max(0,(o.s-d0)/6e4),de:Math.min(1440,(o.e-d0)/6e4)})).filter(x=>x.de>x.ds);
+ const prep=cols.map(c=>c.timed.map(o=>({o,ds:Math.max(0,(o.s-c.date)/6e4),de:Math.min(1440,(o.e-c.date)/6e4)})).filter(x=>x.de>x.ds));
+ let lo=8*60,hi=22*60;
+ cols.forEach((c,i)=>{for(const x of prep[i]){lo=Math.min(lo,x.ds);hi=Math.max(hi,x.de)}for(const u of c.duties||[]){const a=Math.max(0,(u.s-c.date)/6e4),b=Math.min(1440,(u.e-c.date)/6e4);if(b>a){lo=Math.min(lo,a);hi=Math.max(hi,b)}}});
+ const h0=Math.floor(lo/60),h1=Math.min(24,Math.ceil(hi/60)),base=h0*60,span=h1-h0;
+ h+=`<div class="hours">${Array.from({length:span},(_,i)=>`<div${i?'':' style="transform:none;padding-top:2px"'}>${h0+i}:00</div>`).join('')}</div>`;
+ for(const[ci,c]of cols.entries()){
+  const d0=c.date,items=prep[ci].map(x=>({o:x.o,ds:x.ds-base,de:x.de-base}));
   layout(items);
-  const now=same(d0,t)?`<div class="nowl" style="top:${(t.getHours()*60+t.getMinutes())/60*H}px"></div>`:'';
+  const nm=t.getHours()*60+t.getMinutes();
+  const now=same(d0,t)&&nm>=base&&nm<=h1*60?`<div class="nowl" style="top:${(nm-base)/60*H}px"></div>`:'';
   const wk=d0.getDay()%6===0&&!c.member;
   const dl=[];for(const u of (c.duties||[]).sort((a,b)=>a.s-b.s)){let l=dl.findIndex(e=>e<=u.s);if(l<0){l=dl.length;dl.push(0)}dl[l]=u.e;u.lane=l}
   const LW=cmp?6:9,rp=c.member?Math.max(cmp?8:12,4+dl.length*LW):0;
-  const dut=(c.duties||[]).map(u=>{const a=Math.max(0,(u.s-d0)/6e4),b=Math.min(1440,(u.e-d0)/6e4);if(b<=a)return'';const names=u.kids.map(k=>MK[k].n).join(' et ');
+  const dut=(c.duties||[]).map(u=>{const a=Math.max(0,(u.s-d0)/6e4)-base,b=Math.min(1440,(u.e-d0)/6e4)-base;if(b<=a)return'';const names=u.kids.map(k=>MK[k].n).join(' et ');
    return `<button class="duty" style="right:${(cmp?1:2)+u.lane*LW}px;top:${a/60*H}px;height:${Math.max(8,(b-a)/60*H)}px" data-id="${esc(u.ev.id)}" data-k="${u.k}" title="Accompagne ${esc(names)} · ${esc(evTitle(u.ev))} ${legTxt(u)}${hm(u.s)}–${hm(u.e)}" aria-label="Accompagne ${esc(names)}, ${esc(evTitle(u.ev))}, ${legTxt(u)}${hm(u.s)} à ${hm(u.e)}">${u.kids.map(k=>`<i style="--m:${MK[k].c}"></i>`).join('')}</button>`}).join('');
-  h+=`<div class="col${wk?' wk':''}" style="height:${24*H}px${c.member?';--rp:'+rp+'px':''}" data-date="${dkey(d0)}" data-m="${c.member||''}">${now}${items.map(x=>evBlock(x.o,x.ds,x.de,x.l,x.n,c.member,cmp)).join('')}${dut}</div>`;
+  h+=`<div class="col${wk?' wk':''}" data-h0="${h0}" style="height:${span*H}px${c.member?';--rp:'+rp+'px':''}" data-date="${dkey(d0)}" data-m="${c.member||''}">${now}${items.map(x=>evBlock(x.o,x.ds,x.de,x.l,x.n,c.member,cmp)).join('')}${dut}</div>`;
  }
  return h+'</div>';
 }
@@ -1002,7 +1007,7 @@ $('#main').onclick=e=>{
  const bk=e.target.closest('[data-book]');if(bk){openForm(null,{kind:'booking',vehicle:bk.dataset.book,date:dkey(S.cur)});return}
  const day=e.target.closest('[data-day]');if(day){const d=parse(day.dataset.day);if(same(d,S.selDay)&&innerWidth>=700){S.cur=d;S.view='day';ls.set('fc.view','day')}else{S.selDay=d;if(d.getMonth()!==S.cur.getMonth())S.cur=new Date(d)}render();if(innerWidth<860)setTimeout(()=>$('.side')?.scrollIntoView({behavior:'smooth',block:'start'}),30);return}
  const col=e.target.closest('.col');
- if(col){const r=col.getBoundingClientRect();let min=Math.round(((e.clientY-r.top)/52*60)/30)*30;min=Math.min(1410,Math.max(0,min));
+ if(col){const r=col.getBoundingClientRect();let min=Math.round(((e.clientY-r.top)/52*60)/30)*30+(+col.dataset.h0||0)*60;min=Math.min(1410,Math.max(0,min));
   openForm(null,{date:col.dataset.date,time:pad(Math.floor(min/60))+':'+pad(min%60),member:col.dataset.m||null})}
 };
 $('#main').onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-day]')){e.preventDefault();e.target.click()}};
