@@ -25,7 +25,9 @@ window.FIREBASE_CONFIG = {
   appId: "1:292877478793:web:901608aaff6cd9fa70cf58"
 };
 </script>
-<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))</script>
+<script>if('serviceWorker' in navigator){const had=!!navigator.serviceWorker.controller;let done=false;
+navigator.serviceWorker.addEventListener('controllerchange',()=>{if(had&&!done&&!document.querySelector('#scrim')){done=true;location.reload()}});
+addEventListener('load',()=>navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>{r.update();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')r.update()})}).catch(()=>{}))}</script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
